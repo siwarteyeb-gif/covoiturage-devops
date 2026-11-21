@@ -1,0 +1,24 @@
+<header class="navbar">
+  <div class="container navbar-inner">
+    <a routerLink="/" class="brand">Covoiturage Étudiant</a>
+
+    <nav class="nav-links" aria-label="Navigation principale">
+      @if (auth.isAuthenticated()) {
+        <a routerLink="/trips/search" routerLinkActive="active">Rechercher</a>
+        <a routerLink="/trips/new" routerLinkActive="active">Publier</a>
+        <a routerLink="/trips/mine" routerLinkActive="active">Mes trajets</a>
+        <a routerLink="/bookings" routerLinkActive="active">Réservations</a>
+        <a routerLink="/vehicles" routerLinkActive="active">Véhicules</a>
+        <a routerLink="/profile" routerLinkActive="active">Profil</a>
+        @if (auth.isAdmin()) {
+          <a routerLink="/admin" routerLinkActive="active">Admin</a>
+        }
+        <span class="nav-user">{{ auth.user()?.name }}</span>
+        <button type="button" class="btn btn-outline btn-sm" (click)="logout()">Déconnexion</button>
+      } @else {
+        <a routerLink="/login" routerLinkActive="active">Connexion</a>
+        <a routerLink="/register" class="btn btn-primary btn-sm">Inscription</a>
+      }
+    </nav>
+  </div>
+</header>

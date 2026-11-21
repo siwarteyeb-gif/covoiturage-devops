@@ -1,0 +1,59 @@
+@if (auth.isAuthenticated()) {
+  <section class="page-header">
+    <h1>Bonjour {{ auth.user()?.name }} 👋</h1>
+    <p class="muted">Que souhaitez-vous faire aujourd'hui ?</p>
+  </section>
+
+  <div class="grid">
+    <a routerLink="/trips/search" class="card card-link">
+      <h2>Rechercher un trajet</h2>
+      <p class="muted">Trouvez un conducteur, avec l'itinéraire sur la carte.</p>
+    </a>
+    <a routerLink="/trips/new" class="card card-link">
+      <h2>Publier un trajet</h2>
+      <p class="muted">Proposez vos places libres et partagez les frais.</p>
+    </a>
+    <a routerLink="/bookings" class="card card-link">
+      <h2>Mes réservations</h2>
+      <p class="muted">Suivez vos demandes et acceptez celles que vous recevez.</p>
+    </a>
+    <a routerLink="/vehicles" class="card card-link">
+      <h2>Mes véhicules</h2>
+      <p class="muted">Enregistrez votre voiture pour devenir conducteur.</p>
+    </a>
+  </div>
+} @else {
+  <section class="hero">
+    <div>
+      <h1>Votre campus n'est qu'à un trajet de chez vous.</h1>
+      <p>
+        Trouvez un conducteur ou proposez vos places libres entre étudiants : plus simple, plus
+        économique et plus sûr que les groupes WhatsApp.
+      </p>
+      <div class="hero-actions">
+        <a routerLink="/register" class="btn btn-primary">Créer un compte</a>
+        <a routerLink="/login" class="btn btn-outline">Se connecter</a>
+      </div>
+    </div>
+
+    <svg class="hero-art" viewBox="0 0 440 340" role="img" aria-label="Un itinéraire reliant Tunis, Sousse et Sfax">
+      <path class="road" pathLength="1" d="M70 60 C 250 40, 360 90, 300 160 S 120 210, 190 285 S 340 270, 372 290"
+            fill="none" stroke="#0e1b3d" stroke-width="5" stroke-linecap="round" stroke-dasharray="1" />
+      <g class="stop">
+        <circle cx="70" cy="60" r="15" fill="#1b44c8" />
+        <circle cx="70" cy="60" r="5" fill="#fff" />
+        <text x="94" y="52" font-family="Bricolage Grotesque, sans-serif" font-size="20" font-weight="800" fill="#0e1b3d">Tunis</text>
+      </g>
+      <g class="stop">
+        <circle cx="300" cy="160" r="15" fill="#0e1b3d" />
+        <circle cx="300" cy="160" r="5" fill="#fff" />
+        <text x="324" y="152" font-family="Bricolage Grotesque, sans-serif" font-size="20" font-weight="800" fill="#0e1b3d">Sousse</text>
+      </g>
+      <g class="stop">
+        <circle cx="372" cy="290" r="15" fill="#ffc83d" />
+        <circle cx="372" cy="290" r="5" fill="#0e1b3d" />
+        <text x="250" y="326" font-family="Bricolage Grotesque, sans-serif" font-size="20" font-weight="800" fill="#0e1b3d">Sfax</text>
+      </g>
+    </svg>
+  </section>
+}

@@ -1,0 +1,206 @@
+### ===== Sprints 2 et 3 : tests de l'API (IntelliJ HTTP Client) =====
+### Utilise deux comptes : un conducteur (karim) et un passager (salma).
+### Les variables {{tokenKarim}}, {{tokenSalma}}, {{tokenAdmin}}, {{tripId}}, {{bookingId}} sont remplies automatiquement.
+
+### 0. Inscription des deux comptes (ignore l'erreur 409 s'ils existent déjà)
+POST http://localhost:8080/api/auth/register
+Content-Type: application/json
+
+{ "name": "Karim Ben Ali", "email": "karim@test.tn", "phone": "22123456", "password": "Password1" }
+
+###
+POST http://localhost:8080/api/auth/register
+Content-Type: application/json
+
+{ "name": "Salma Trabelsi", "email": "salma@test.tn", "phone": "55123456", "password": "Password1" }
+
+### Connexion de Karim (conducteur)
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{ "email": "karim@test.tn", "password": "Password1" }
+
+> {% client.global.set("tokenKarim", response.body.token); %}
+
+### Connexion de Salma (passagère)
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{ "email": "salma@test.tn", "password": "Password1" }
+
+> {% client.global.set("tokenSalma", response.body.token); %}
+
+### Connexion de l'admin
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{ "email": "admin@covoiturage.tn", "password": "Admin@12345" }
+
+> {% client.global.set("tokenAdmin", response.body.token); %}
+
+### ===================== SPRINT 2 : trajets =====================
+
+### Karim ajoute un véhicule
+POST http://localhost:8080/api/vehicles
+Authorization: Bearer {{tokenKarim}}
+Content-Type: application/json
+
+{ "brand": "Peugeot", "model": "208", "color": "Gris", "seats": 4 }
+
+> {% client.global.set("vehicleId", response.body.id); %}
+
+### F09 : autocomplétion d'adresses
+GET http://localhost:8080/api/maps/geocode?query=manou
+Authorization: Bearer {{tokenKarim}}
+
+### F10 : itinéraire + prix suggéré (Ariana -> La Manouba, 3 places)
+GET http://localhost:8080/api/maps/route?fromLat=36.8665&fromLng=10.1647&toLat=36.8101&toLng=10.0863&seats=3
+Authorization: Bearer {{tokenKarim}}
+
+### F08 : Karim publie un trajet (change la date : elle doit être dans le futur)
+POST http://localhost:8080/api/trips
+Authorization: Bearer {{tokenKarim}}
+Content-Type: application/json
+
+{
+  "vehicleId": {{vehicleId}},
+  "departureAddress": "Ariana, Tunisie", "departureLat": 36.8665, "departureLng": 10.1647,
+  "arrivalAddress": "La Manouba, Tunisie", "arrivalLat": 36.8101, "arrivalLng": 10.0863,
+  "departureDateTime": "2027-01-15T07:30:00",
+  "totalSeats": 3, "pricePerSeat": 1.0
+}
+
+> {% client.global.set("tripId", response.body[0].id); %}
+
+### F15 : trajets récurrents (lundi et mercredi pendant 4 semaines)
+POST http://localhost:8080/api/trips
+Authorization: Bearer {{tokenKarim}}
+Content-Type: application/json
+
+{
+  "vehicleId": {{vehicleId}},
+  "departureAddress": "Ariana, Tunisie", "departureLat": 36.8665, "departureLng": 10.1647,
+  "arrivalAddress": "La Manouba, Tunisie", "arrivalLat": 36.8101, "arrivalLng": 10.0863,
+  "departureDateTime": "2027-01-18T08:00:00",
+  "totalSeats": 2, "pricePerSeat": 1.0,
+  "recurrenceWeekdays": [1, 3], "recurrenceWeeks": 4
+}
+
+### F12 : Salma recherche par texte
+GET http://localhost:8080/api/trips/search?from=ariana&to=manouba&date=2027-01-15&seats=1
+Authorization: Bearer {{tokenSalma}}
+
+### F14 : Salma recherche avec coordonnées (matching par détour, 5 km max)
+GET http://localhost:8080/api/trips/search?fromLat=36.8665&fromLng=10.1647&toLat=36.8101&toLng=10.0863&maxDetourKm=5&sort=detour
+Authorization: Bearer {{tokenSalma}}
+
+### Détail du trajet avec l'itinéraire (F16)
+GET http://localhost:8080/api/trips/{{tripId}}
+Authorization: Bearer {{tokenSalma}}
+
+### Mes trajets (conducteur)
+GET http://localhost:8080/api/trips/me
+Authorization: Bearer {{tokenKarim}}
+
+### F11 : modifier le trajet
+PUT http://localhost:8080/api/trips/{{tripId}}
+Authorization: Bearer {{tokenKarim}}
+Content-Type: application/json
+
+{ "departureDateTime": "2027-01-15T08:00:00", "totalSeats": 3, "pricePerSeat": 1.2 }
+
+### ===================== SPRINT 3 : réservations =====================
+
+### F17 : Salma demande 2 places
+POST http://localhost:8080/api/trips/{{tripId}}/bookings
+Authorization: Bearer {{tokenSalma}}
+Content-Type: application/json
+
+{ "seats": 2 }
+
+> {% client.global.set("bookingId", response.body.id); %}
+
+### RG3 : même demande une 2e fois -> 409
+POST http://localhost:8080/api/trips/{{tripId}}/bookings
+Authorization: Bearer {{tokenSalma}}
+Content-Type: application/json
+
+{ "seats": 1 }
+
+### RG2 : Karim réserve son propre trajet -> 400
+POST http://localhost:8080/api/trips/{{tripId}}/bookings
+Authorization: Bearer {{tokenKarim}}
+Content-Type: application/json
+
+{ "seats": 1 }
+
+### Demandes reçues par Karim
+GET http://localhost:8080/api/bookings/received
+Authorization: Bearer {{tokenKarim}}
+
+### F18 : Karim accepte (il reste 1 place)
+PATCH http://localhost:8080/api/bookings/{{bookingId}}/accept
+Authorization: Bearer {{tokenKarim}}
+
+### F21 : réservations de Salma (téléphones visibles après acceptation)
+GET http://localhost:8080/api/bookings/me
+Authorization: Bearer {{tokenSalma}}
+
+### F19 : Salma annule (les places sont rendues)
+PATCH http://localhost:8080/api/bookings/{{bookingId}}/cancel
+Authorization: Bearer {{tokenSalma}}
+
+### F22 : Karim démarre puis termine le trajet (nécessaire pour les avis)
+PATCH http://localhost:8080/api/trips/{{tripId}}/status
+Authorization: Bearer {{tokenKarim}}
+Content-Type: application/json
+
+{ "status": "IN_PROGRESS" }
+
+###
+PATCH http://localhost:8080/api/trips/{{tripId}}/status
+Authorization: Bearer {{tokenKarim}}
+Content-Type: application/json
+
+{ "status": "DONE" }
+
+### F24 : Salma note Karim (réservation acceptée + trajet terminé)
+POST http://localhost:8080/api/bookings/{{bookingId}}/review
+Authorization: Bearer {{tokenSalma}}
+Content-Type: application/json
+
+{ "rating": 5, "comment": "Conducteur ponctuel et sympathique" }
+
+### Avis reçus par un utilisateur (remplace 2 par l'id de Karim)
+GET http://localhost:8080/api/users/2/reviews
+Authorization: Bearer {{tokenSalma}}
+
+### ===================== ADMINISTRATION =====================
+
+### F26 : liste des utilisateurs
+GET http://localhost:8080/api/admin/users
+Authorization: Bearer {{tokenAdmin}}
+
+### Bloquer l'utilisateur 3 (RG9 : il ne pourra plus se connecter)
+PATCH http://localhost:8080/api/admin/users/3/block
+Authorization: Bearer {{tokenAdmin}}
+
+###
+PATCH http://localhost:8080/api/admin/users/3/unblock
+Authorization: Bearer {{tokenAdmin}}
+
+### F28 : statistiques
+GET http://localhost:8080/api/admin/stats
+Authorization: Bearer {{tokenAdmin}}
+
+### F27 : trajets et avis à modérer
+GET http://localhost:8080/api/admin/trips
+Authorization: Bearer {{tokenAdmin}}
+
+###
+GET http://localhost:8080/api/admin/reviews
+Authorization: Bearer {{tokenAdmin}}
+
+### Un utilisateur normal sur /api/admin -> 403
+GET http://localhost:8080/api/admin/stats
+Authorization: Bearer {{tokenSalma}}

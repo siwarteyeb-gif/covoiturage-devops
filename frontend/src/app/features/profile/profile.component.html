@@ -1,0 +1,96 @@
+<section class="page-header">
+  <h1>Mon profil</h1>
+</section>
+
+@if (loadError()) {
+  <div class="alert alert-error" role="alert">{{ loadError() }}</div>
+}
+
+<div class="grid grid-2">
+  <div class="card">
+    <h2>Informations personnelles</h2>
+
+    @if (auth.user(); as user) {
+      <ul class="info-list">
+        <li><span class="muted">Email</span> <strong>{{ user.email }}</strong></li>
+        <li><span class="muted">Note moyenne</span> <strong>{{ user.averageRating | number: '1.1-1' }} / 5</strong></li>
+        <li><span class="muted">Membre depuis</span> <strong>{{ user.createdAt | date: 'dd/MM/yyyy' }}</strong></li>
+      </ul>
+    }
+
+    @if (profileError()) { <div class="alert alert-error" role="alert">{{ profileError() }}</div> }
+    @if (profileSuccess()) { <div class="alert alert-success" role="status">{{ profileSuccess() }}</div> }
+
+    <form [formGroup]="profileForm" (ngSubmit)="saveProfile()" novalidate>
+      <div class="form-group">
+        <label for="name">Nom complet</label>
+        <input id="name" type="text" formControlName="name" />
+        @if (profileErr('name')) { <small class="error-text">{{ profileErr('name') }}</small> }
+      </div>
+
+      <div class="form-group">
+        <label for="phone">Téléphone</label>
+        <input id="phone" type="tel" formControlName="phone" placeholder="22123456" />
+        @if (profileErr('phone')) { <small class="error-text">{{ profileErr('phone') }}</small> }
+      </div>
+
+      <button type="submit" class="btn btn-primary" [disabled]="savingProfile()">
+        {{ savingProfile() ? 'Enregistrement...' : 'Enregistrer' }}
+      </button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Changer le mot de passe</h2>
+
+    @if (passwordError()) { <div class="alert alert-error" role="alert">{{ passwordError() }}</div> }
+    @if (passwordSuccess()) { <div class="alert alert-success" role="status">{{ passwordSuccess() }}</div> }
+
+    <form [formGroup]="passwordForm" (ngSubmit)="changePassword()" novalidate>
+      <div class="form-group">
+        <label for="currentPassword">Mot de passe actuel</label>
+        <input id="currentPassword" type="password" formControlName="currentPassword" autocomplete="current-password" />
+        @if (passwordErr('currentPassword')) { <small class="error-text">{{ passwordErr('currentPassword') }}</small> }
+      </div>
+
+      <div class="form-group">
+        <label for="newPassword">Nouveau mot de passe</label>
+        <input id="newPassword" type="password" formControlName="newPassword" autocomplete="new-password" />
+        @if (passwordErr('newPassword')) { <small class="error-text">{{ passwordErr('newPassword') }}</small> }
+      </div>
+
+      <div class="form-group">
+        <label for="confirmPassword">Confirmer le nouveau mot de passe</label>
+        <input id="confirmPassword" type="password" formControlName="confirmPassword" autocomplete="new-password" />
+        @if (passwordErr('confirmPassword')) {
+          <small class="error-text">{{ passwordErr('confirmPassword') }}</small>
+        } @else if (passwordMismatch()) {
+          <small class="error-text">Les mots de passe ne correspondent pas</small>
+        }
+      </div>
+
+      <button type="submit" class="btn btn-primary" [disabled]="savingPassword()">
+        {{ savingPassword() ? 'Modification...' : 'Modifier le mot de passe' }}
+      </button>
+    </form>
+  </div>
+</div>
+
+<div class="card" style="margin-top: 1rem">
+  <h2>Avis reçus</h2>
+  @if (reviews().length === 0) {
+    <p class="muted">Vous n'avez pas encore reçu d'avis.</p>
+  } @else {
+    <ul class="item-list">
+      @for (r of reviews(); track r.id) {
+        <li class="item">
+          <div>
+            <strong>{{ r.author.name }}</strong> · {{ r.rating }} / 5
+            <div class="muted">{{ r.comment || 'Sans commentaire' }}</div>
+          </div>
+          <span class="muted">{{ r.createdAt | date: 'dd/MM/yyyy' }}</span>
+        </li>
+      }
+    </ul>
+  }
+</div>

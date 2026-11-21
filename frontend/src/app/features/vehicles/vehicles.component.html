@@ -1,0 +1,76 @@
+<section class="page-header">
+  <h1>Mes véhicules</h1>
+  <p class="muted">Un conducteur est un utilisateur qui a au moins un véhicule enregistré.</p>
+</section>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h2>{{ editingId() === null ? 'Ajouter un véhicule' : 'Modifier le véhicule' }}</h2>
+
+    @if (formError()) { <div class="alert alert-error" role="alert">{{ formError() }}</div> }
+
+    <form [formGroup]="form" (ngSubmit)="save()" novalidate>
+      <div class="form-group">
+        <label for="brand">Marque</label>
+        <input id="brand" type="text" formControlName="brand" placeholder="Peugeot" />
+        @if (err('brand')) { <small class="error-text">{{ err('brand') }}</small> }
+      </div>
+
+      <div class="form-group">
+        <label for="model">Modèle</label>
+        <input id="model" type="text" formControlName="model" placeholder="208" />
+        @if (err('model')) { <small class="error-text">{{ err('model') }}</small> }
+      </div>
+
+      <div class="form-group">
+        <label for="color">Couleur (facultatif)</label>
+        <input id="color" type="text" formControlName="color" placeholder="Gris" />
+        @if (err('color')) { <small class="error-text">{{ err('color') }}</small> }
+      </div>
+
+      <div class="form-group">
+        <label for="seats">Places passagers (sans le conducteur)</label>
+        <input id="seats" type="number" min="1" max="8" formControlName="seats" />
+        @if (err('seats')) { <small class="error-text">{{ err('seats') }}</small> }
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary" [disabled]="saving()">
+          {{ saving() ? 'Enregistrement...' : editingId() === null ? 'Ajouter' : 'Enregistrer' }}
+        </button>
+        @if (editingId() !== null) {
+          <button type="button" class="btn btn-outline" (click)="cancelEdit()">Annuler</button>
+        }
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Liste de mes véhicules</h2>
+
+    @if (listError()) { <div class="alert alert-error" role="alert">{{ listError() }}</div> }
+
+    @if (loading()) {
+      <p class="muted">Chargement...</p>
+    } @else if (vehicles().length === 0) {
+      <p class="muted">Vous n'avez pas encore de véhicule. Ajoutez-en un avec le formulaire.</p>
+    } @else {
+      <ul class="item-list">
+        @for (v of vehicles(); track v.id) {
+          <li class="item">
+            <div>
+              <strong>{{ v.brand }} {{ v.model }}</strong>
+              <div class="muted">
+                {{ v.color || 'Couleur non précisée' }} · {{ v.seats }} place{{ v.seats > 1 ? 's' : '' }}
+              </div>
+            </div>
+            <div class="item-actions">
+              <button type="button" class="btn btn-outline btn-sm" (click)="edit(v)">Modifier</button>
+              <button type="button" class="btn btn-danger btn-sm" (click)="remove(v)">Supprimer</button>
+            </div>
+          </li>
+        }
+      </ul>
+    }
+  </div>
+</div>
