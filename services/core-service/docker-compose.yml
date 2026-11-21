@@ -1,12 +1,10 @@
-# Lance MySQL + le back-end :  docker compose up --build
+
 services:
   db:
     image: mysql:8
     environment:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: covoiturage_db
-    ports:
-      - "3307:3306"
     volumes:
       - db_data:/var/lib/mysql
     healthcheck:
@@ -14,12 +12,10 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+      start_period: 20s
 
   backend:
     build: .
-    depends_on:
-      db:
-        condition: service_healthy
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/covoiturage_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       DB_USERNAME: root
@@ -27,8 +23,18 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production-0123456789abcdef}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@12345}
       ORS_API_KEY: ${ORS_API_KEY:-}
+      APP_VERSION: ${APP_VERSION:-dev}
     ports:
       - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 
 volumes:
   db_data:

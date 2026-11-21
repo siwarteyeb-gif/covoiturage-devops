@@ -1,3 +1,4 @@
+
 package com.example.covoiturage.config;
 
 import com.example.covoiturage.security.JwtAuthenticationFilter;
@@ -39,35 +40,61 @@ public class SecurityConfig {
     }
 
     @Bean
-    public AuthenticationManager authenticationManager(AuthenticationConfiguration configuration) throws Exception {
+    public AuthenticationManager authenticationManager(
+            AuthenticationConfiguration configuration) throws Exception {
         return configuration.getAuthenticationManager();
     }
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http,
-                                                   JwtService jwtService,
-                                                   UserDetailsService userDetailsService) throws Exception {
+    public SecurityFilterChain securityFilterChain(
+            HttpSecurity http,
+            JwtService jwtService,
+            UserDetailsService userDetailsService) throws Exception {
 
-        JwtAuthenticationFilter jwtFilter = new JwtAuthenticationFilter(jwtService, userDetailsService);
+        JwtAuthenticationFilter jwtFilter =
+                new JwtAuthenticationFilter(jwtService, userDetailsService);
 
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
-                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .sessionManagement(s ->
+                        s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/error").permitAll()
-                        .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
+
+                        // DevOps health and version endpoints
+                        .requestMatchers("/health", "/version").permitAll()
+
+                        .requestMatchers(
+                                "/swagger-ui/**",
+                                "/swagger-ui.html",
+                                "/v3/api-docs/**"
+                        ).permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
-                        .anyRequest().authenticated())
+                        .anyRequest().authenticated()
+                )
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint((request, response, e) ->
-                                SecurityJsonResponses.write(response, 401, "Unauthorized",
-                                        "Authentification requise ou token invalide"))
+                                SecurityJsonResponses.write(
+                                        response,
+                                        401,
+                                        "Unauthorized",
+                                        "Authentification requise ou token invalide"
+                                ))
                         .accessDeniedHandler((request, response, e) ->
-                                SecurityJsonResponses.write(response, 403, "Forbidden", "Accès refusé")))
-                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+                                SecurityJsonResponses.write(
+                                        response,
+                                        403,
+                                        "Forbidden",
+                                        "Accès refusé"
+                                ))
+                )
+                .addFilterBefore(
+                        jwtFilter,
+                        UsernamePasswordAuthenticationFilter.class
+                );
 
         return http.build();
     }
@@ -76,12 +103,16 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOrigins(Arrays.asList(allowedOrigins));
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        config.setAllowedMethods(
+                List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
+        );
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(false);
 
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        UrlBasedCorsConfigurationSource source =
+                new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
+
         return source;
     }
 }
