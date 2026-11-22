@@ -67,6 +67,7 @@ check_secrets() {
   if [ -z "$hits" ]; then ok "aucune cle privee ni jeton detecte"; else fail "secret probable :"; echo "$hits" | head -5; fi
 
   # Les mots de passe ne doivent pas etre ecrits en dur dans les fichiers Compose / CI
+  # shellcheck disable=SC2016
   hits="$(grep -n -E '^\s*(DB_PASSWORD|DB_ROOT_PASSWORD|JWT_SECRET|ADMIN_PASSWORD|MARIADB_(ROOT_)?PASSWORD):\s*[A-Za-z0-9]' docker-compose*.yml .github/workflows/*.yml 2>/dev/null | grep -v '\${' || true)"
   if [ -z "$hits" ]; then ok "mots de passe lus depuis l'environnement (pas en dur)"; else fail "mot de passe en dur :"; echo "$hits"; fi
 }
