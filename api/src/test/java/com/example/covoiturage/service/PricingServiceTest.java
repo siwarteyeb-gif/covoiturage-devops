@@ -13,16 +13,19 @@ class PricingServiceTest {
     @Test
     void suggestedPriceSharesTheCostBetweenPassengersAndDriver() {
         // 12 km x 0,30 = 3,6 TND ; 3 passagers + le conducteur = 4 parts
-        assertEquals(new BigDecimal("0.90"), pricing.suggestedPrice(12.0, 3));
+        assertEquals(0, new BigDecimal("0.90").compareTo(
+                pricing.suggestedPrice(12.0, 3)));
     }
 
     @Test
     void maxPriceIsSuggestedPriceTimesFactor() {
-        assertEquals(new BigDecimal("1.35"), pricing.maxPrice(12.0, 3));
+        assertEquals(0, new BigDecimal("1.35").compareTo(
+                pricing.maxPrice(12.0, 3)));
     }
 
     @Test
     void maxPriceIsAtLeastOneDinar() {
-        assertEquals(new BigDecimal("1.00"), pricing.maxPrice(1.0, 3));
+        assertEquals(0, new BigDecimal("1.00").compareTo(
+                pricing.maxPrice(1.0, 3)));
     }
 }
