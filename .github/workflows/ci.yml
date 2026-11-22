@@ -1,38 +1,160 @@
-
 name: CI - Covoiturage
 
+# Pull request : controles + tests + construction (sans publier)
+# Push sur main : idem + publication des images (tag sha-xxxxxxx) + test de bout en bout
 on:
+  pull_request:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  SERVICES: '["api","map-service","notification-service","frontend"]'
 
 jobs:
-  test-and-build:
-    runs-on: ubuntu-latest
-
+  # ------------------------------------------------------------------ 1. CHECK
+  check:
+    runs-on: ubuntu-24.04
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - name: Controle du depot (script Bash, code 0 = succes)
+        run: ./scripts/check.sh static
+      - name: Analyse des scripts (shellcheck)
+        run: shellcheck scripts/*.sh
+      - name: Analyse des Dockerfiles (hadolint)
+        run: |
+          for f in api map-service notification-service frontend; do
+            echo "== $f"
+            docker run --rm -i hadolint/hadolint:v2.12.0 hadolint --failure-threshold error - < "$f/Dockerfile"
+          done
+      - name: Validation de Compose
+        run: ./scripts/check.sh compose
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+  # ------------------------------------------------------------------ 2. TEST
+  # Matrice : 3 services Java x 2 versions du JDK = 6 executions en parallele
+  test-java:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, map-service, notification-service]
+        jdk: ["17", "21"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: ${{ matrix.jdk }}
           cache: maven
-
-      - name: Run tests
-        working-directory: services/core-service
-        run: ./mvnw -B test
-
-      - name: Build application
-        working-directory: services/core-service
-        run: ./mvnw -B package -DskipTests
-
-      - name: Upload JAR artifact
+      - name: Tests unitaires + couverture
+        working-directory: ${{ matrix.service }}
+        run: mvn -B verify
+      - name: Rapport de tests en artefact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: covoiturage-backend
-          path: services/core-service/target/*.jar
-          retention-days: 7
+          name: tests-${{ matrix.service }}-jdk${{ matrix.jdk }}
+          path: |
+            ${{ matrix.service }}/target/surefire-reports/
+            ${{ matrix.service }}/target/site/jacoco/
+          retention-days: 14
+
+  test-frontend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.12"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Installation
+        working-directory: frontend
+        run: npm ci --legacy-peer-deps
+      - name: Tests unitaires
+        working-directory: frontend
+        run: npx ng test --watch=false 2>&1 | tee frontend-tests.log
+      - name: Compilation de production
+        working-directory: frontend
+        run: npx ng build --configuration production
+      - name: Rapport de tests en artefact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tests-frontend
+          path: frontend/frontend-tests.log
+          retention-days: 14
+
+  # ------------------------------------------------------------------ 3. BUILD
+  # Une image PAR service, construite seulement apres les tests (needs).
+  # Elle est taguee sha-xxxxxxx et ne sera plus jamais reconstruite : la release ne fait qu'ajouter des etiquettes.
+  build:
+    needs: [check, test-java, test-frontend]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, map-service, notification-service, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Nom de l'image (minuscules obligatoires)
+        run: |
+          echo "PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          echo "SHORT=sha-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Construction (et publication sur main)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.service }}
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ env.PREFIX }}/${{ matrix.service }}:${{ env.SHORT }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+
+  # ------------------------------------------------------------------ 4. VERIFY
+  smoke:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Demarrer toute la pile avec les images construites
+        run: |
+          rnd() { head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c "$1"; }
+          {
+            echo "IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}"
+            echo "IMAGE_TAG=sha-${GITHUB_SHA::7}"
+            echo "DB_ROOT_PASSWORD=$(rnd 24)"
+            echo "DB_PASSWORD=$(rnd 24)"
+            echo "JWT_SECRET=$(rnd 48)"
+            echo "ADMIN_PASSWORD=Ci-$(rnd 16)-1aA"
+          } > .env
+          docker compose -f docker-compose.yml up -d --wait --wait-timeout 240
+      - name: Test de bout en bout (passerelle -> API -> map-service)
+        run: |
+          set -a; . ./.env; set +a
+          ./scripts/smoke.sh http://localhost:8080 admin@covoiturage.tn "$ADMIN_PASSWORD"
+      - name: Journaux en cas d'echec
+        if: failure()
+        run: docker compose -f docker-compose.yml logs --tail=80

@@ -1,0 +1,12 @@
+# Surcouche pour le developpement local : construit les images depuis les sources.
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
+# (ou simplement "docker compose up --build" si COMPOSE_FILE est defini dans .env)
+services:
+  map-service:
+    build: ./map-service
+  notification-service:
+    build: ./notification-service
+  api:
+    build: ./api
+  frontend:
+    build: ./frontend
