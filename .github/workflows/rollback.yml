@@ -1,0 +1,40 @@
+name: Rollback
+
+# Retour arriere manuel : Actions > Rollback > Run workflow
+# - sans version : retour a la version precedente memorisee sur le serveur
+# - avec une version (ex. v1.1.0) : mise en service de cette version precise
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version cible (vide = version precedente)"
+        required: false
+        type: string
+
+jobs:
+  rollback:
+    runs-on: ubuntu-24.04
+    environment:
+      name: test
+      url: http://${{ vars.DEPLOY_HOST }}:${{ vars.APP_PORT || '8080' }}
+    env:
+      TARGET: ${{ vars.DEPLOY_USER }}@${{ vars.DEPLOY_HOST }}
+      DIR: ${{ vars.DEPLOY_DIR }}
+      APP_PORT: ${{ vars.APP_PORT || '8080' }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cle SSH
+        run: |
+          install -m 600 /dev/null key
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > key
+          echo "SSH_OPTS=-i $PWD/key -o StrictHostKeyChecking=accept-new -o BatchMode=yes" >> "$GITHUB_ENV"
+      - name: Retour arriere
+        run: |
+          if [ -n "$VERSION" ]; then
+            ssh $SSH_OPTS "$TARGET" "cd $DIR && ./scripts/deploy.sh $VERSION --no-rollback"
+          else
+            ssh $SSH_OPTS "$TARGET" "cd $DIR && ./scripts/rollback.sh"
+          fi
+      - name: Controle de sante
+        run: ./scripts/check.sh health "http://${{ vars.DEPLOY_HOST }}:$APP_PORT/health" 90

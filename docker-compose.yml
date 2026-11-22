@@ -1,0 +1,94 @@
+# Application complete : base de donnees + 3 micro-services + frontend (passerelle nginx).
+# Les images viennent du registre : IMAGE_PREFIX et IMAGE_TAG definissent laquelle est lancee.
+# Developpement local avec construction des images : voir docker-compose.build.yml
+name: covoiturage
+
+services:
+  db:
+    image: mariadb:11.4.4
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD manquant (voir .env.example)}
+      MARIADB_DATABASE: ${DB_NAME:-covoiturage_db}
+      MARIADB_USER: ${DB_USER:-covoiturage}
+      MARIADB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD manquant (voir .env.example)}
+    volumes:
+      - db_data:/var/lib/mysql          # donnees conservees apres un redemarrage
+    # Pas de "ports:" : la base n'est joignable que par les autres services du reseau Compose
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  map-service:
+    image: ${IMAGE_PREFIX:-covoiturage}/map-service:${IMAGE_TAG:-dev}
+    restart: unless-stopped
+    environment:
+      ORS_API_KEY: ${ORS_API_KEY:-}
+    # Pas de "ports:" : service interne, appele seulement par l'API
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:8081/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  notification-service:
+    image: ${IMAGE_PREFIX:-covoiturage}/notification-service:${IMAGE_TAG:-dev}
+    restart: unless-stopped
+    environment:
+      MAIL_ENABLED: ${MAIL_ENABLED:-false}
+      MAIL_FROM: ${MAIL_FROM:-no-reply@covoiturage.tn}
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:8082/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  api:
+    image: ${IMAGE_PREFIX:-covoiturage}/api:${IMAGE_TAG:-dev}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      map-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+    environment:
+      # La base est joignable par le NOM du service Compose ("db"), pas par localhost
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/${DB_NAME:-covoiturage_db}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      DB_USERNAME: ${DB_USER:-covoiturage}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET manquant (32 caracteres minimum)}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@covoiturage.tn}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD manquant}
+      MAP_SERVICE_URL: http://map-service:8081
+      NOTIFICATION_SERVICE_URL: http://notification-service:8082
+      APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-http://localhost:8080}
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 15
+      start_period: 60s
+
+  frontend:
+    image: ${IMAGE_PREFIX:-covoiturage}/frontend:${IMAGE_TAG:-dev}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-8080}:8080"        # seul point d'entree public
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  db_data:

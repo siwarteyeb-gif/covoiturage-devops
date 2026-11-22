@@ -1,48 +1,102 @@
+name: CD - Release
 
-name: CD - Docker Release
-
+# Tag vX.Y.Z : on PROMEUT les images deja construites et testees (aucune reconstruction),
+# on cree la release GitHub, puis on met en service sur le serveur de test (si configure).
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ["v[0-9]+.[0-9]+.[0-9]+", "v[0-9]+.[0-9]+.[0-9]+-*"]
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
-  docker-release:
-    runs-on: ubuntu-latest
-
+  promote:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, map-service, notification-service, frontend]
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Etiquettes de version (meme image, meme empreinte)
+        run: |
+          PREFIX="ghcr.io/${GITHUB_REPOSITORY,,}/${{ matrix.service }}"
+          SRC="$PREFIX:sha-${GITHUB_SHA::7}"
+          VERSION="${GITHUB_REF_NAME}"          # v1.2.0 ou v1.3.0-rc1
+          PLAIN="${VERSION#v}"                  # 1.2.0
 
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha
+          if ! docker buildx imagetools inspect "$SRC" > /dev/null 2>&1; then
+            echo "::error::Image $SRC introuvable. Taguer un commit de main dont le workflow CI est vert."
+            exit 1
+          fi
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./services/core-service
-          file: ./services/core-service/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          TAGS=("-t" "$PREFIX:$VERSION" "-t" "$PREFIX:$PLAIN")
+          if [[ "$PLAIN" != *-* ]]; then        # version stable : etiquettes 1.2, 1 et latest
+            MAJOR="${PLAIN%%.*}"
+            MINOR="${PLAIN%.*}"
+            TAGS+=("-t" "$PREFIX:$MINOR" "-t" "$PREFIX:$MAJOR" "-t" "$PREFIX:latest")
+          fi
+          docker buildx imagetools create "${TAGS[@]}" "$SRC"
+          echo "### ${{ matrix.service }} $VERSION" >> "$GITHUB_STEP_SUMMARY"
+          docker buildx imagetools inspect "$PREFIX:$VERSION" | grep -E "^Digest" >> "$GITHUB_STEP_SUMMARY"
+
+  github-release:
+    needs: promote
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Release GitHub avec notes generees
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          flags=(--generate-notes)
+          [[ "$GITHUB_REF_NAME" == *-* ]] && flags+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" "${flags[@]}" --title "$GITHUB_REF_NAME"
+
+  # Mise en service : seulement si un serveur est configure (variable DEPLOY_HOST du depot)
+  deploy:
+    needs: promote
+    if: ${{ vars.DEPLOY_HOST != '' && !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-24.04
+    environment:
+      name: test
+      url: http://${{ vars.DEPLOY_HOST }}:${{ vars.APP_PORT || '8080' }}
+    env:
+      TARGET: ${{ vars.DEPLOY_USER }}@${{ vars.DEPLOY_HOST }}
+      DIR: ${{ vars.DEPLOY_DIR }}
+      APP_PORT: ${{ vars.APP_PORT || '8080' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cle SSH
+        run: |
+          install -m 600 /dev/null key
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > key
+          echo "SSH_OPTS=-i $PWD/key -o StrictHostKeyChecking=accept-new -o BatchMode=yes" >> "$GITHUB_ENV"
+      - name: Fichiers et secrets sur le serveur
+        run: |
+          ssh $SSH_OPTS "$TARGET" "mkdir -p $DIR/scripts"
+          scp $SSH_OPTS docker-compose.yml "$TARGET:$DIR/"
+          scp $SSH_OPTS scripts/*.sh "$TARGET:$DIR/scripts/"
+          ssh $SSH_OPTS "$TARGET" "umask 077 && cat > $DIR/.env" <<ENVFILE
+          IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}
+          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+          DB_ROOT_PASSWORD=${{ secrets.DB_ROOT_PASSWORD }}
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}
+          ORS_API_KEY=${{ secrets.ORS_API_KEY }}
+          APP_PORT=$APP_PORT
+          APP_CORS_ALLOWED_ORIGINS=http://${{ vars.DEPLOY_HOST }}:$APP_PORT
+          ENVFILE
+      - name: Connexion au registre depuis le serveur
+        run: printf '%s' "${{ secrets.GITHUB_TOKEN }}" | ssh $SSH_OPTS "$TARGET" "docker login ghcr.io -u ${{ github.actor }} --password-stdin"
+      - name: Mise en service (retour automatique en cas d'echec)
+        run: ssh $SSH_OPTS "$TARGET" "cd $DIR && chmod +x scripts/*.sh && ./scripts/deploy.sh $GITHUB_REF_NAME"
+      - name: Controle de sante depuis l'exterieur
+        run: ./scripts/check.sh health "http://${{ vars.DEPLOY_HOST }}:$APP_PORT/health" 90

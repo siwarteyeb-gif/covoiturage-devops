@@ -1,9 +1,22 @@
-target/
-node_modules/
-.angular/
-dist/
-.idea/
-*.iml
-.vscode/
+# Secrets et configuration locale
 .env
+*.pem
+*.key
+.deploy/
+
+# Java / Maven
+target/
+*.iml
+.idea/
 HELP.md
+.mvn/wrapper/maven-wrapper.jar
+
+# Node / Angular
+node_modules/
+dist/
+.angular/
+
+# Systeme
+.DS_Store
+Thumbs.db
+*.log
