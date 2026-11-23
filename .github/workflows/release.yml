@@ -1,10 +1,10 @@
+
 name: CD - Release
 
-# Tag vX.Y.Z : on PROMEUT les images deja construites et testees (aucune reconstruction),
-# on cree la release GitHub, puis on met en service sur le serveur de test (si configure).
 on:
   push:
-    tags: ["v[0-9]+.[0-9]+.[0-9]+", "v[0-9]+.[0-9]+.[0-9]+-*"]
+    tags:
+      - "v*"
 
 permissions:
   contents: write
@@ -17,42 +17,51 @@ jobs:
       fail-fast: false
       matrix:
         service: [api, map-service, notification-service, frontend]
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: docker/setup-buildx-action@v3
+
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Etiquettes de version (meme image, meme empreinte)
+
+      - name: Etiquettes de version
         run: |
           PREFIX="ghcr.io/${GITHUB_REPOSITORY,,}/${{ matrix.service }}"
           SRC="$PREFIX:sha-${GITHUB_SHA::7}"
-          VERSION="${GITHUB_REF_NAME}"          # v1.2.0 ou v1.3.0-rc1
-          PLAIN="${VERSION#v}"                  # 1.2.0
+          VERSION="${GITHUB_REF_NAME}"
+          PLAIN="${VERSION#v}"
 
           if ! docker buildx imagetools inspect "$SRC" > /dev/null 2>&1; then
-            echo "::error::Image $SRC introuvable. Taguer un commit de main dont le workflow CI est vert."
+            echo "::error::Image $SRC introuvable."
             exit 1
           fi
 
           TAGS=("-t" "$PREFIX:$VERSION" "-t" "$PREFIX:$PLAIN")
-          if [[ "$PLAIN" != *-* ]]; then        # version stable : etiquettes 1.2, 1 et latest
+
+          if [[ "$PLAIN" != *-* ]]; then
             MAJOR="${PLAIN%%.*}"
             MINOR="${PLAIN%.*}"
             TAGS+=("-t" "$PREFIX:$MINOR" "-t" "$PREFIX:$MAJOR" "-t" "$PREFIX:latest")
           fi
+
           docker buildx imagetools create "${TAGS[@]}" "$SRC"
+
           echo "### ${{ matrix.service }} $VERSION" >> "$GITHUB_STEP_SUMMARY"
           docker buildx imagetools inspect "$PREFIX:$VERSION" | grep -E "^Digest" >> "$GITHUB_STEP_SUMMARY"
 
   github-release:
     needs: promote
     runs-on: ubuntu-24.04
+
     steps:
       - uses: actions/checkout@v4
-      - name: Release GitHub avec notes generees
+
+      - name: Release GitHub
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -60,43 +69,66 @@ jobs:
           [[ "$GITHUB_REF_NAME" == *-* ]] && flags+=(--prerelease)
           gh release create "$GITHUB_REF_NAME" "${flags[@]}" --title "$GITHUB_REF_NAME"
 
-  # Mise en service : seulement si un serveur est configure (variable DEPLOY_HOST du depot)
-  deploy:
-    needs: promote
-    if: ${{ vars.DEPLOY_HOST != '' && !contains(github.ref_name, '-') }}
-    runs-on: ubuntu-24.04
-    environment:
-      name: test
-      url: http://${{ vars.DEPLOY_HOST }}:${{ vars.APP_PORT || '8080' }}
+  deploy-local:
+    name: Deploiement automatique sur PC local
+    needs: [promote, github-release]
+
+    if: ${{ vars.LOCAL_DEPLOY == 'true' && !contains(github.ref_name, '-') }}
+
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 25
+
     env:
-      TARGET: ${{ vars.DEPLOY_USER }}@${{ vars.DEPLOY_HOST }}
-      DIR: ${{ vars.DEPLOY_DIR }}
+      DEPLOY_DIR: 'C:\c\pj-serveur'
       APP_PORT: ${{ vars.APP_PORT || '8080' }}
+
     steps:
       - uses: actions/checkout@v4
-      - name: Cle SSH
+
+      - name: Configurer Git Bash
+        shell: pwsh
         run: |
-          install -m 600 /dev/null key
-          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > key
-          echo "SSH_OPTS=-i $PWD/key -o StrictHostKeyChecking=accept-new -o BatchMode=yes" >> "$GITHUB_ENV"
-      - name: Fichiers et secrets sur le serveur
+          $gitBash = "C:\Program Files\Git\bin"
+          if (!(Test-Path "$gitBash\bash.exe")) {
+            throw "Git Bash introuvable"
+          }
+          $gitBash | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          Write-Host "Git Bash configure."
+
+      - name: Verification de Docker et du fichier .env
+        shell: pwsh
         run: |
-          ssh $SSH_OPTS "$TARGET" "mkdir -p $DIR/scripts"
-          scp $SSH_OPTS docker-compose.yml "$TARGET:$DIR/"
-          scp $SSH_OPTS scripts/*.sh "$TARGET:$DIR/scripts/"
-          ssh $SSH_OPTS "$TARGET" "umask 077 && cat > $DIR/.env" <<ENVFILE
-          IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}
-          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-          DB_ROOT_PASSWORD=${{ secrets.DB_ROOT_PASSWORD }}
-          JWT_SECRET=${{ secrets.JWT_SECRET }}
-          ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}
-          ORS_API_KEY=${{ secrets.ORS_API_KEY }}
-          APP_PORT=$APP_PORT
-          APP_CORS_ALLOWED_ORIGINS=http://${{ vars.DEPLOY_HOST }}:$APP_PORT
-          ENVFILE
-      - name: Connexion au registre depuis le serveur
-        run: printf '%s' "${{ secrets.GITHUB_TOKEN }}" | ssh $SSH_OPTS "$TARGET" "docker login ghcr.io -u ${{ github.actor }} --password-stdin"
-      - name: Mise en service (retour automatique en cas d'echec)
-        run: ssh $SSH_OPTS "$TARGET" "cd $DIR && chmod +x scripts/*.sh && ./scripts/deploy.sh $GITHUB_REF_NAME"
-      - name: Controle de sante depuis l'exterieur
-        run: ./scripts/check.sh health "http://${{ vars.DEPLOY_HOST }}:$APP_PORT/health" 90
+          docker info
+
+          if (!(Test-Path "$env:DEPLOY_DIR\.env")) {
+            throw "Fichier .env introuvable dans $env:DEPLOY_DIR"
+          }
+
+      - name: Copier les fichiers de deploiement
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:DEPLOY_DIR\scripts" | Out-Null
+
+          Copy-Item "$env:GITHUB_WORKSPACE\docker-compose.yml" `
+                    "$env:DEPLOY_DIR\docker-compose.yml" -Force
+
+          Copy-Item "$env:GITHUB_WORKSPACE\scripts\*.sh" `
+                    "$env:DEPLOY_DIR\scripts\" -Force
+
+          Write-Host "Fichiers de deploiement copies."
+          Write-Host "Le fichier .env local est conserve."
+
+      - name: Mise en service avec rollback automatique
+        shell: bash
+        run: |
+          cd /c/c/pj-serveur
+          chmod +x scripts/*.sh
+          ./scripts/deploy.sh "$GITHUB_REF_NAME"
+
+      - name: Controle de sante final
+        shell: bash
+        run: |
+          ./scripts/check.sh health "http://localhost:${APP_PORT}/health" 90
+
+          echo "### Version en service : $GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"
+          echo "Application : http://localhost:${APP_PORT}" >> "$GITHUB_STEP_SUMMARY"
