@@ -1,4 +1,4 @@
-
+﻿
 name: Rollback
 
 on:
@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configurer Git Bash
-        shell: pwsh
+        shell: powershell
         run: |
           $gitBash = "C:\Program Files\Git\bin"
           if (!(Test-Path "$gitBash\bash.exe")) {
@@ -38,7 +38,7 @@ jobs:
           $gitBash | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Verification de Docker et .env
-        shell: pwsh
+        shell: powershell
         run: |
           docker info
 
@@ -47,7 +47,7 @@ jobs:
           }
 
       - name: Copier les scripts
-        shell: pwsh
+        shell: powershell
         run: |
           New-Item -ItemType Directory -Force "$env:DEPLOY_DIR\scripts" | Out-Null
 
@@ -76,3 +76,4 @@ jobs:
 
           echo "### Rollback termine" >> "$GITHUB_STEP_SUMMARY"
           echo "Version demandee : ${VERSION:-precedente}" >> "$GITHUB_STEP_SUMMARY"
+
