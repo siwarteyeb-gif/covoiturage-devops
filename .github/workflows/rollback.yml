@@ -1,8 +1,6 @@
+
 name: Rollback
 
-# Retour arriere manuel : Actions > Rollback > Run workflow
-# - sans version : retour a la version precedente memorisee sur le serveur
-# - avec une version (ex. v1.1.0) : mise en service de cette version precise
 on:
   workflow_dispatch:
     inputs:
@@ -11,30 +9,70 @@ on:
         required: false
         type: string
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   rollback:
-    runs-on: ubuntu-24.04
-    environment:
-      name: test
-      url: http://${{ vars.DEPLOY_HOST }}:${{ vars.APP_PORT || '8080' }}
+    name: Retour arriere sur PC local
+    if: ${{ vars.LOCAL_DEPLOY == 'true' }}
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 20
+
     env:
-      TARGET: ${{ vars.DEPLOY_USER }}@${{ vars.DEPLOY_HOST }}
-      DIR: ${{ vars.DEPLOY_DIR }}
+      DEPLOY_DIR: 'C:\c\pj-serveur'
       APP_PORT: ${{ vars.APP_PORT || '8080' }}
       VERSION: ${{ inputs.version }}
+
     steps:
       - uses: actions/checkout@v4
-      - name: Cle SSH
+
+      - name: Configurer Git Bash
+        shell: pwsh
         run: |
-          install -m 600 /dev/null key
-          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > key
-          echo "SSH_OPTS=-i $PWD/key -o StrictHostKeyChecking=accept-new -o BatchMode=yes" >> "$GITHUB_ENV"
+          $gitBash = "C:\Program Files\Git\bin"
+          if (!(Test-Path "$gitBash\bash.exe")) {
+            throw "Git Bash introuvable"
+          }
+          $gitBash | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Verification de Docker et .env
+        shell: pwsh
+        run: |
+          docker info
+
+          if (!(Test-Path "$env:DEPLOY_DIR\.env")) {
+            throw "Fichier .env introuvable"
+          }
+
+      - name: Copier les scripts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:DEPLOY_DIR\scripts" | Out-Null
+
+          Copy-Item "$env:GITHUB_WORKSPACE\scripts\*.sh" `
+                    "$env:DEPLOY_DIR\scripts\" -Force
+
       - name: Retour arriere
+        shell: bash
         run: |
-          if [ -n "$VERSION" ]; then
-            ssh $SSH_OPTS "$TARGET" "cd $DIR && ./scripts/deploy.sh $VERSION --no-rollback"
+          cd /c/c/pj-serveur
+          chmod +x scripts/*.sh
+
+          if [[ -n "$VERSION" ]]; then
+            echo "==> Retour vers $VERSION"
+            ./scripts/deploy.sh "$VERSION" --no-rollback
           else
-            ssh $SSH_OPTS "$TARGET" "cd $DIR && ./scripts/rollback.sh"
+            echo "==> Retour vers la version precedente"
+            ./scripts/rollback.sh
           fi
+
       - name: Controle de sante
-        run: ./scripts/check.sh health "http://${{ vars.DEPLOY_HOST }}:$APP_PORT/health" 90
+        shell: bash
+        run: |
+          cd /c/c/pj-serveur
+          ./scripts/check.sh health "http://localhost:${APP_PORT}/health" 90
+
+          echo "### Rollback termine" >> "$GITHUB_STEP_SUMMARY"
+          echo "Version demandee : ${VERSION:-precedente}" >> "$GITHUB_STEP_SUMMARY"
